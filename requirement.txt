@@ -1,7 +1,6 @@
 fastapi
-uvicorn
-pandas
-numpy
-scikit-learn
+uvicorn[standard]
 pydantic
-pytest  
+pandas
+scikit-learn
+gunicorn
