@@ -16,20 +16,20 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 # Initialize FastAPI app
 app = FastAPI()
 
-# CORS middleware (adjust origins in production)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Adjust for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Base path
+# Base paths
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "src" / "data" / "models"
 
-# Input schema
+# Pydantic input model
 class UserInput(BaseModel):
     age: int
     weight: float
@@ -38,7 +38,7 @@ class UserInput(BaseModel):
     activity_level: str
     goal: str
 
-# Load models and preprocessing
+# Load models
 def load_models(model_dir=MODEL_DIR):
     models = {}
     for target in ['target_calories', 'protein_ratio', 'carb_ratio', 'fat_ratio', 'exercise_intensity']:
@@ -51,7 +51,7 @@ def load_models(model_dir=MODEL_DIR):
 
     preprocessing_path = model_dir / "preprocessing.pkl"
     if not preprocessing_path.exists():
-        logging.error("Preprocessing pipeline not found")
+        logging.error(f"Preprocessing pipeline not found at {preprocessing_path}")
         raise HTTPException(status_code=500, detail="Preprocessing pipeline not found")
 
     with open(preprocessing_path, 'rb') as f:
@@ -59,26 +59,33 @@ def load_models(model_dir=MODEL_DIR):
 
     return models, preprocessing
 
+# Health check
+@app.get("/")
+def root():
+    return {"message": "Fitness Plan API is live. Use POST /api/fitness-plan."}
+
+# Prediction endpoint
 @app.post("/api/fitness-plan")
 async def get_fitness_plan(user_input: UserInput):
+    logging.info("Received POST request at /api/fitness-plan")
     try:
-        # Load models and preprocessing
+        # Load models
         models, preprocessing = load_models()
 
         # Prepare input
-        input_data = pd.DataFrame([user_input.dict()])
+        input_df = pd.DataFrame([user_input.dict()])
+        logging.debug(f"Input DataFrame:\n{input_df}")
 
-        # Transform input
-        X_transformed = preprocessing.transform(input_data)
-
-        # Reconstruct column names
+        # Transform
+        X_transformed = preprocessing.transform(input_df)
         numeric_features = ['age', 'weight', 'height']
         cat_features = ['gender', 'activity_level', 'goal']
         cat_feature_names = preprocessing.transformers_[1][1].named_steps['encoder'].get_feature_names_out(cat_features)
         all_feature_names = numeric_features + list(cat_feature_names)
         X_input_df = pd.DataFrame(X_transformed, columns=all_feature_names)
+        logging.debug(f"Transformed DataFrame:\n{X_input_df}")
 
-        # Predict outputs
+        # Predict
         predictions = {}
         for target, model in models.items():
             predictions[target] = float(model.predict(X_input_df)[0])
@@ -105,10 +112,5 @@ async def get_fitness_plan(user_input: UserInput):
         }
 
     except Exception as e:
-        logging.error(f"Error occurred: {str(e)}", exc_info=True)
+        logging.error(f"Unhandled error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
-
-# Uncomment this if running locally
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
